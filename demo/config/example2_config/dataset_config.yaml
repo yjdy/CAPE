@@ -1,0 +1,7 @@
+### Tiny data for demo only
+tiny_parquet:
+    data_root: ../data/
+    data_format: parquet
+    train_data: ../data/tiny_parquet/train.parquet
+    valid_data: ../data/tiny_parquet/valid.parquet
+    test_data: ../data/tiny_parquet/test.parquet
