@@ -335,6 +335,7 @@ def multi_head_attention_forward(
     static_v: Optional[torch.Tensor] = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    position = None
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     r"""Forward method for MultiHeadAttention.
 
@@ -458,6 +459,7 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
             average_attn_weights=average_attn_weights,
+            position=position,
         )
 
     is_batched = _mha_shape_check(
@@ -673,69 +675,44 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
 
-    if need_weights:
-        _B, _Nt, E = q.shape
-        q_scaled = q * math.sqrt(1.0 / float(E))
+    _B, _Nt, E = q.shape
+    q_scaled = q * math.sqrt(1.0 / float(E))
 
-        assert not (
-            is_causal and attn_mask is None
-        ), "FIXME: is_causal not implemented for need_weights"
+    assert not (
+        is_causal and attn_mask is None
+    ), "FIXME: is_causal not implemented for need_weights"
 
-        if attn_mask is not None:
-            attn_output_weights = torch.baddbmm(
-                attn_mask, q_scaled, k.transpose(-2, -1)
-            )
-        else:
-            attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
-        attn_output_weights = softmax(attn_output_weights, dim=-1)
-        if dropout_p > 0.0:
-            attn_output_weights = dropout(attn_output_weights, p=dropout_p)
-
-        attn_output = torch.bmm(attn_output_weights, v)
-
-        attn_output = (
-            attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+    if attn_mask is not None:
+        attn_output_weights = torch.baddbmm(
+            attn_mask, q_scaled, k.transpose(-2, -1)
         )
-        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
-
-        # optionally average attention weights over heads
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        if average_attn_weights:
-            attn_output_weights = attn_output_weights.mean(dim=1)
-
-        if not is_batched:
-            # squeeze the output if input was unbatched
-            attn_output = attn_output.squeeze(1)
-            attn_output_weights = attn_output_weights.squeeze(0)
-        return attn_output, attn_output_weights
     else:
-        # attn_mask can be either (L,S) or (N*num_heads, L, S)
-        # if attn_mask's shape is (1, L, S) we need to unsqueeze to (1, 1, L, S)
-        # in order to match the input for SDPA of (N, num_heads, L, S)
-        if attn_mask is not None:
-            if attn_mask.size(0) == 1 and attn_mask.dim() == 3:
-                attn_mask = attn_mask.unsqueeze(0)
-            else:
-                attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
+        attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+    if position:
+        attn_output_weights += position(q, attn_output_weights)
 
-        q = q.view(bsz, num_heads, tgt_len, head_dim)
-        k = k.view(bsz, num_heads, src_len, head_dim)
-        v = v.view(bsz, num_heads, src_len, head_dim)
+    attn_output_weights = softmax(attn_output_weights, dim=-1)
+    if dropout_p > 0.0:
+        attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
-        attn_output = F.scaled_dot_product_attention(
-            q, k, v, attn_mask, dropout_p, is_causal
-        )
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+    attn_output = torch.bmm(attn_output_weights, v)
 
-        attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
-        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
-        if not is_batched:
-            # squeeze the output if input was unbatched
-            attn_output = attn_output.squeeze(1)
-        return attn_output, None
+    attn_output = (
+        attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+    )
+    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
+    # optionally average attention weights over heads
+    attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+    if average_attn_weights:
+        attn_output_weights = attn_output_weights.mean(dim=1)
+
+    if not is_batched:
+        # squeeze the output if input was unbatched
+        attn_output = attn_output.squeeze(1)
+        attn_output_weights = attn_output_weights.squeeze(0)
+    return attn_output, attn_output_weights
 
 
 # Copied from torch.nn.MultiheadAttention
@@ -824,6 +801,9 @@ class MultiheadAttention(nn.Module):
         batch_first=False,
         device=None,
         dtype=None,
+        max_sequence_length=100,
+        position = False,
+        position_dim=None,
     ) -> None:
         if embed_dim <= 0 or num_heads <= 0:
             raise ValueError(
@@ -879,6 +859,12 @@ class MultiheadAttention(nn.Module):
             self.bias_k = self.bias_v = None
 
         self.add_zero_attn = add_zero_attn
+        if position:
+            from .position_encoding import CAPE
+            position_dim = position_dim if position_dim is not None else embed_dim
+            self.position = CAPE(position_dim, max_sequence_length,embedding_dim=embed_dim)
+        else:
+            self.position = None
 
         self._reset_parameters()
 
@@ -1137,6 +1123,7 @@ class MultiheadAttention(nn.Module):
                 v_proj_weight=self.v_proj_weight,
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal,
+                position=self.position
             )
         else:
             attn_output, attn_output_weights = multi_head_attention_forward(
@@ -1159,6 +1146,7 @@ class MultiheadAttention(nn.Module):
                 attn_mask=attn_mask,
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal,
+                position=self.position
             )
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
