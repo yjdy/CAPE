@@ -96,4 +96,7 @@ DIN_default: # This is a config template
     seed: 2019
     monitor: {'AUC': 1, 'logloss': -1}
     monitor_mode: 'max'
+    use_cope: False
+    position_dim: 32
+    max_sequence_length: 100
 

@@ -27,8 +27,8 @@ import numpy as np
 from pandas.core.common import flatten
 from fuxictr.pytorch.models import BaseModel
 from fuxictr.pytorch.layers import FeatureEmbeddingDict, MLP_Block
-from torch.nn import MultiheadAttention
-
+# from torch.nn import MultiheadAttention
+from fuxictr.pytorch.layers.attentions.attention import MultiheadAttention
 
 class BST(BaseModel):
     def __init__(self, 
@@ -53,6 +53,9 @@ class BST(BaseModel):
                  use_causal_mask=False,
                  embedding_regularizer=None,
                  net_regularizer=None,
+                 use_cope=False,
+                 position_dim=32,
+                 max_sequence_length=100,
                  **kwargs):
         super(BST, self).__init__(feature_map, 
                                   model_id=model_id, 
@@ -187,7 +190,7 @@ class BehaviorTransformer(nn.Module):
                  use_position_emb=True,
                  position_dim=4,
                  layer_norm=True,
-                 use_residual=True):
+                 use_residual=True,use_cope=False,max_sequence_length=100):
         super(BehaviorTransformer, self).__init__()
         self.position_dim = position_dim
         self.use_position_emb = use_position_emb
@@ -197,8 +200,10 @@ class BehaviorTransformer(nn.Module):
                                                                  attn_dropout=attn_dropout, 
                                                                  net_dropout=net_dropout,
                                                                  layer_norm=layer_norm,
-                                                                 use_residual=use_residual)
+                                                                 use_residual=use_residual,
+                                                                 use_cope=use_cope,position_dim=position_dim,max_sequence_length=max_sequence_length)
                                                 for _ in range(stacked_transformer_layers))
+        self.use_cope = use_cope
         if self.use_position_emb:
             self.position_emb = nn.Parameter(torch.Tensor(seq_len, position_dim))
             self.reset_parameters()
@@ -223,12 +228,15 @@ class BehaviorTransformer(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(self, model_dim=64, ffn_dim=64, num_heads=8, attn_dropout=0.0, net_dropout=0.0,
-                 layer_norm=True, use_residual=True):
+                 layer_norm=True, use_residual=True,use_cope=False,position_dim=32,max_sequence_length=100):
         super(TransformerBlock, self).__init__()
         self.attention = MultiheadAttention(model_dim,
                                             num_heads=num_heads, 
                                             dropout=attn_dropout,
-                                            batch_first=True)
+                                            batch_first=True,
+                                            use_cope=use_cope,
+                                            position_dim=position_dim,
+                                            max_sequence_length=max_sequence_length)
         self.ffn = nn.Sequential(nn.Linear(model_dim, ffn_dim),
                                  nn.LeakyReLU(),
                                  nn.Linear(ffn_dim, model_dim))

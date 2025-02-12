@@ -43,6 +43,9 @@ class DIN(BaseModel):
                  din_use_softmax=False,
                  embedding_regularizer=None, 
                  net_regularizer=None,
+                 use_cope=False,
+                 position_dim=None,
+                 max_sequence_length=100,
                  **kwargs):
         super(DIN, self).__init__(feature_map,
                                   model_id=model_id, 
@@ -70,7 +73,8 @@ class DIN(BaseModel):
                            hidden_activations=attention_hidden_activations,
                            output_activation=attention_output_activation,
                            dropout_rate=attention_dropout,
-                           use_softmax=din_use_softmax)
+                           use_softmax=din_use_softmax,use_cope=use_cope,
+                           max_sequence_length=max_sequence_length,position_dim=position_dim)
              for target_field in self.din_target_field])
         self.dnn = MLP_Block(input_dim=feature_map.sum_emb_out_dim(),
                              output_dim=1,

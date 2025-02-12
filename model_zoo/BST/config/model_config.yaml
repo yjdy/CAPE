@@ -75,4 +75,7 @@ BST_default: # This is a config template
     seed: 20222023
     monitor: {'AUC': 1, 'logloss': -1}
     monitor_mode: 'max'
+    use_cope: False
+    position_dim: 64
+    max_sequence_length: 100
 

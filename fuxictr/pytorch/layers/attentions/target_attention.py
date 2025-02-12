@@ -31,10 +31,14 @@ class DIN_Attention(nn.Module):
                  output_activation=None,
                  dropout_rate=0,
                  batch_norm=False,
-                 use_softmax=False):
+                 use_softmax=False,
+                 use_cope=False,
+                 position_dim=None,
+                 max_sequence_length=100):
         super(DIN_Attention, self).__init__()
         self.embedding_dim = embedding_dim
         self.use_softmax = use_softmax
+        self.use_cope = use_cope
         if isinstance(hidden_activations, str) and hidden_activations.lower() == "dice":
             hidden_activations = [Dice(units) for units in attention_units]
         self.attention_layer = MLP_Block(input_dim=4 * embedding_dim,
@@ -44,6 +48,10 @@ class DIN_Attention(nn.Module):
                                          output_activation=output_activation,
                                          dropout_rates=dropout_rate,
                                          batch_norm=batch_norm)
+        if use_cope:
+            from .position_encoding import CAPE
+            position_dim = position_dim if position_dim is not None else embedding_dim
+            self.position = CAPE(position_dim, max_sequence_length,embedding_dim)
 
     def forward(self, target_item, history_sequence, mask=None):
         """
@@ -59,6 +67,9 @@ class DIN_Attention(nn.Module):
         attention_weight = attention_weight.view(-1, seq_len) # b x len
         if mask is not None:
             attention_weight = attention_weight * mask.float()
+        if self.use_cope:
+            pe = self.position(target_item, attention_weight.unsqueeze(1))
+            attention_weight += pe.squeeze(1)
         if self.use_softmax:
             if mask is not None:
                 attention_weight += -1.e9 * (1 - mask.float())
