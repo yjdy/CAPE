@@ -99,6 +99,8 @@ def get_activation(activation, hidden_units=None):
         elif activation.lower() == "dice":
             from fuxictr.pytorch.layers.activations import Dice
             return Dice(hidden_units)
+        elif activation.lower() in ['silu', 'swish']:
+            return nn.SiLU()
         else:
             return getattr(nn, activation)()
     elif isinstance(activation, list):
