@@ -7,55 +7,44 @@ import math
 from fuxictr.pytorch.torch_utils import get_activation
 
 class DeepseekMLP(nn.Module):
-    def __init__(self, config, hidden_size = None, intermediate_size = None):
+    def __init__(self, hidden_size = None, intermediate_size = None, hidden_act='silu'):
         super().__init__()
-        self.config = config
-        self.hidden_size = config.hidden_size if hidden_size is None else hidden_size
-        self.intermediate_size = config.intermediate_size if intermediate_size is None else intermediate_size
+        self.hidden_size = hidden_size
+        self.intermediate_size = intermediate_size if intermediate_size is None else hidden_size
 
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
-        self.act_fn = get_activation(config.hidden_act)
+        self.act_fn = get_activation(hidden_act)
 
     def forward(self, x):
-        if self.config.pretraining_tp > 1:
-            slice = self.intermediate_size // self.config.pretraining_tp
-            gate_proj_slices = self.gate_proj.weight.split(slice, dim=0)
-            up_proj_slices = self.up_proj.weight.split(slice, dim=0)
-            down_proj_slices = self.down_proj.weight.split(slice, dim=1)
-
-            gate_proj = torch.cat(
-                [F.linear(x, gate_proj_slices[i]) for i in range(self.config.pretraining_tp)], dim=-1
-            )
-            up_proj = torch.cat([F.linear(x, up_proj_slices[i]) for i in range(self.config.pretraining_tp)], dim=-1)
-
-            intermediate_states = (self.act_fn(gate_proj) * up_proj).split(slice, dim=2)
-            down_proj = [
-                F.linear(intermediate_states[i], down_proj_slices[i]) for i in range(self.config.pretraining_tp)
-            ]
-            down_proj = sum(down_proj)
-        else:
-            down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
         return down_proj
 
 class MoEGate(nn.Module):
-    def __init__(self, config, gamma=0.1, routed_scaling_factor=2.5):
+    def __init__(self,hidden_size,
+                 n_routed_experts,
+                 num_experts_per_tok,
+                 scoring_func='sigmoid',
+                 aux_loss_alpha = 0.001,
+                 seq_aux = True,
+                 norm_topk_prob = True,
+                 gamma=0.1,
+                 routed_scaling_factor=2.5):
         super().__init__()
-        self.config = config
-        self.top_k = config.num_experts_per_tok
-        self.n_routed_experts = config.n_routed_experts
+        self.top_k = num_experts_per_tok
+        self.n_routed_experts = n_routed_experts
 
-        self.scoring_func = config.scoring_func
-        self.alpha = config.aux_loss_alpha
-        self.seq_aux = config.seq_aux
+        self.scoring_func = scoring_func
+        self.alpha = aux_loss_alpha
+        self.seq_aux = seq_aux
 
         # topk selection algorithm
-        self.norm_topk_prob = config.norm_topk_prob
-        self.gating_dim = config.hidden_size
+        self.norm_topk_prob = norm_topk_prob
+        self.gating_dim = hidden_size
         self.weight = nn.Parameter(torch.empty((self.n_routed_experts, self.gating_dim)))
-        self.biases = nn.Parameter(torch.zeros(self.n_routed_experts))
+        self.biases = nn.Parameter(torch.zeros(1, self.n_routed_experts))
         self.reset_parameters()
         self.gamma = gamma
         self.routed_scaling_factor = routed_scaling_factor
@@ -95,16 +84,21 @@ class MoEGate(nn.Module):
         logits = F.linear(hidden_states, self.weight, None)
         if self.scoring_func == 'softmax':
             scores = logits.softmax(dim=-1)
+        elif self.scoring_func == 'sigmoid':
+            scores = logits.sigmoid()
         else:
             raise NotImplementedError(f'insupportable scoring function for MoE gating: {self.scoring_func}')
 
         ### select top-k experts
-        topk_weight, topk_idx = torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
+        _, topk_idx = torch.topk(scores+self.biases, k=self.top_k, dim=-1, sorted=False)
+        topk_weight = torch.gather(scores, 1, topk_idx)
 
         ### norm gate to sum 1
         if self.top_k > 1 and self.norm_topk_prob:
             denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
             topk_weight = topk_weight / denominator
+        if self.routed_scaling_factor > 0:
+            topk_weight *= self.routed_scaling_factor
 
         ### expert-level computation auxiliary loss
         if self.training and self.alpha > 0.0:
@@ -154,15 +148,22 @@ class DeepseekMoE(nn.Module):
     """
     A mixed expert module containing shared experts.
     """
-    def __init__(self, config):
+    def __init__(self, hidden_size,
+                 n_routed_experts=16,
+                 num_experts_per_tok=6,
+                 n_shared_experts=2,
+                 moe_intermediate_size=None,
+                 hidden_act='silu'):
         super().__init__()
-        self.config = config
-        self.num_experts_per_tok = config.num_experts_per_tok
-        self.experts = nn.ModuleList([DeepseekMLP(config, intermediate_size = config.moe_intermediate_size) for i in range(config.n_routed_experts)])
-        self.gate = MoEGate(config)
-        if config.n_shared_experts is not None:
-            intermediate_size = config.moe_intermediate_size * config.n_shared_experts
-            self.shared_experts = DeepseekMLP(config=config, intermediate_size = intermediate_size)
+        self.num_experts_per_tok = num_experts_per_tok
+        self.n_routed_experts = n_routed_experts
+        self.moe_intermediate_size = moe_intermediate_size if moe_intermediate_size else hidden_size
+        self.experts = nn.ModuleList([DeepseekMLP(hidden_size, intermediate_size = self.moe_intermediate_size,hidden_act=hidden_act) for _ in range(self.n_routed_experts)])
+        self.gate = MoEGate(hidden_size,n_routed_experts,num_experts_per_tok)
+        self.n_shared_experts = n_shared_experts
+        if self.n_shared_experts is not None:
+            intermediate_size = moe_intermediate_size * n_shared_experts
+            self.shared_experts = DeepseekMLP(hidden_size,intermediate_size=intermediate_size,hidden_act=hidden_act)
 
     def forward(self, hidden_states):
         identity = hidden_states
@@ -180,7 +181,7 @@ class DeepseekMoE(nn.Module):
             y = AddAuxiliaryLoss.apply(y, aux_loss)
         else:
             y = self.moe_infer(hidden_states, flat_topk_idx, topk_weight.view(-1, 1)).view(*orig_shape)
-        if self.config.n_shared_experts is not None:
+        if self.n_shared_experts is not None:
             y = y + self.shared_experts(identity)
         return y
 

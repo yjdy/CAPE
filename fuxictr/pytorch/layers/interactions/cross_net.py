@@ -59,6 +59,25 @@ class CrossNetV2(nn.Module):
             X_i = X_i + X_0 * self.cross_layers[i](X_i)
         return X_i
 
+from fuxictr.pytorch.layers.blocks.moe_block import DeepseekMoE
+class CrossNetV2MOE(nn.Module):
+    def __init__(self, input_dim, num_layers):
+        super(CrossNetV2, self).__init__()
+        self.num_layers = num_layers
+        self.cross_layers = nn.ModuleList(nn.Linear(input_dim, input_dim)
+                                          for _ in range(self.num_layers))
+        self.moe = DeepseekMoE(input_dim,
+                               n_routed_experts=16,
+                               num_experts_per_tok=2,
+                               moe_intermediate_size=int(input_dim//4))
+
+    def forward(self, X_0):
+        X_0 = self.moe(X_0) # 看一下维度
+        X_i = X_0 # b x dim
+        for i in range(self.num_layers):
+            X_i = X_i + X_0 * self.cross_layers[i](X_i)
+        return X_i
+
 
 class CrossNetMix(nn.Module):
     """ CrossNetMix improves CrossNetV2 by:
