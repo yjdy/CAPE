@@ -91,7 +91,7 @@ class MoEGate(nn.Module):
 
         ### select top-k experts
         _, topk_idx = torch.topk(scores+self.biases, k=self.top_k, dim=-1, sorted=False)
-        topk_weight = torch.gather(scores, 1, topk_idx)
+        topk_weight = torch.gather(scores, -1, topk_idx)
 
         ### norm gate to sum 1
         if self.top_k > 1 and self.norm_topk_prob:
@@ -158,7 +158,8 @@ class DeepseekMoE(nn.Module):
         self.num_experts_per_tok = num_experts_per_tok
         self.n_routed_experts = n_routed_experts
         self.moe_intermediate_size = moe_intermediate_size if moe_intermediate_size else hidden_size
-        self.experts = nn.ModuleList([DeepseekMLP(hidden_size, intermediate_size = self.moe_intermediate_size,hidden_act=hidden_act) for _ in range(self.n_routed_experts)])
+        self.experts = nn.ModuleList([DeepseekMLP(hidden_size, intermediate_size=self.moe_intermediate_size,hidden_act=hidden_act)
+                                      for _ in range(self.n_routed_experts)])
         self.gate = MoEGate(hidden_size,n_routed_experts,num_experts_per_tok)
         self.n_shared_experts = n_shared_experts
         if self.n_shared_experts is not None:
