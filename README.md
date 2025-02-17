@@ -2,7 +2,7 @@
 source code of paper "A Contextual-Aware Position Encoding for Sequential Recommendation", WWW'25
 
 ## Quick Start
-1. Run a model on benchmark datasets (e.g., Criteo)
+1. Run a model on benchmark datasets (e.g., KuaiVideo)
 
    Users can follow the [benchmark section](#Benchmarking) to get benchmark datasets and running steps for reproducing the existing results. Please see an example here: https://github.com/reczoo/BARS/tree/main/ranking/ctr/DCNv2/DCNv2_criteo_x1
 
