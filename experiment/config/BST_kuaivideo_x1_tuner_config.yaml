@@ -1,5 +1,5 @@
-base_config: ../model_zoo/DIN/config/
-base_expid: DIN_default
+base_config: ../model_zoo/BST/config/
+base_expid: BST_default
 dataset_id: kuaivideo_x1
 
 dataset_config:
@@ -30,7 +30,7 @@ dataset_config:
 
 
 tuner_space:
-    model_root: './checkpoints/DIN_kuaivideo_x1/'
+    model_root: './checkpoints/BST_kuaivideo_x1/'
     feature_specs: [[
             {name: item_emb, feature_encoder: "nn.Linear(64, 64, bias=False)"},
             {name: pos_items, feature_encoder: null},
@@ -40,23 +40,25 @@ tuner_space:
         ]]
     embedding_dim: 64
     dnn_hidden_units: [[1024, 512, 256]]
-    attention_hidden_units: [[512, 256]]
-    attention_hidden_activations: [ReLU, Dice]
-    dnn_activations: [ReLU, Dice]
-    attention_output_activation: null
-    din_target_field: [[!!python/tuple [item_id, item_emb], !!python/tuple [item_id, item_emb]]]
-    din_sequence_field: [[!!python/tuple [pos_items, pos_items_emb], !!python/tuple [neg_items, neg_items_emb]]]
-    din_use_softmax: True
-    use_cope: True
+    num_heads: [8, 1, 4]
+    stacked_transformer_layers: 1
+    layer_norm: False
+    bst_target_field: [[!!python/tuple [item_id, item_emb], !!python/tuple [item_id, item_emb]]]
+    bst_sequence_field: [[!!python/tuple [pos_items, pos_items_emb], !!python/tuple [neg_items, neg_items_emb]]]
+    seq_pooling_type: ["mean", "target"]
+    use_position_emb: [True, False]
+    use_causal_mask: [False, True]
+    attention_dropout: [0.1, 0]
+    use_residual: [True, False]
     embedding_regularizer: 1.e-4
-    attention_dropout: 0.2
-    net_dropout: [0.1, 0.2, 0.3]
-    batch_norm: [False, True]
+    net_dropout: [0.1, 0.2]
+    batch_norm: False
     learning_rate: 1.e-3
-    batch_size: 2048
+    batch_size: 4096
     seed: 20222023
     group_id: group_id
     metrics: [[gAUC, AUC, logloss]]
     monitor: {"gAUC": 1, "AUC": 1}
-    max_sequence_length: 100 # equal to max_len of sequenctial feature in feature_cols
-    position_dim: [ 16,32,64 ]
+    use_cope: True
+    position_dim: 64
+    max_sequence_length: 100
