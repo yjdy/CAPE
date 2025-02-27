@@ -1,7 +1,7 @@
 # CAPE
 source code of paper "A Contextual-Aware Position Encoding for Sequential Recommendation", WWW'25
 
-<div align="left">
+<div align="center">
 
 [![arXiv](https://img.shields.io/badge/arXiv%20paper-2409.12740-da282a.svg)](https://arxiv.org/pdf/2502.09027)
 <a href="https://github.com/reczoo/FuxiCTR/blob/main/LICENSE"><img src="https://img.shields.io/github/license/reczoo/fuxictr.svg" style="max-width: 100%;" alt="License"></a>
