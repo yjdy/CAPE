@@ -20,7 +20,6 @@
     [PDF] https://arxiv.org/pdf/1905.06874v1.pdf
 """
 
-
 import torch
 from torch import nn
 import numpy as np
@@ -30,17 +29,18 @@ from fuxictr.pytorch.layers import FeatureEmbeddingDict, MLP_Block
 # from torch.nn import MultiheadAttention
 from fuxictr.pytorch.layers.attentions.attention import MultiheadAttention
 
+
 class BST(BaseModel):
-    def __init__(self, 
-                 feature_map, 
-                 model_id="BST", 
-                 gpu=-1, 
+    def __init__(self,
+                 feature_map,
+                 model_id="BST",
+                 gpu=-1,
                  dnn_hidden_units=[256, 128, 64],
                  dnn_activations="ReLU",
                  num_heads=2,
                  stacked_transformer_layers=1,
                  attention_dropout=0,
-                 learning_rate=1e-3, 
+                 learning_rate=1e-3,
                  embedding_dim=10,
                  net_dropout=0,
                  batch_norm=False,
@@ -48,7 +48,7 @@ class BST(BaseModel):
                  use_residual=True,
                  bst_target_field=[("item_id", "cate_id")],
                  bst_sequence_field=[("click_history", "cate_history")],
-                 seq_pooling_type="mean", # ["mean", "sum", "target", "concat"]
+                 seq_pooling_type="mean",  # ["mean", "sum", "target", "concat"]
                  use_position_emb=True,
                  use_causal_mask=False,
                  embedding_regularizer=None,
@@ -57,10 +57,10 @@ class BST(BaseModel):
                  position_dim=32,
                  max_sequence_length=100,
                  **kwargs):
-        super(BST, self).__init__(feature_map, 
-                                  model_id=model_id, 
-                                  gpu=gpu, 
-                                  embedding_regularizer=embedding_regularizer, 
+        super(BST, self).__init__(feature_map,
+                                  model_id=model_id,
+                                  gpu=gpu,
+                                  embedding_regularizer=embedding_regularizer,
                                   net_regularizer=net_regularizer,
                                   **kwargs)
         if type(bst_target_field) != list:
@@ -70,7 +70,7 @@ class BST(BaseModel):
             bst_sequence_field = [bst_sequence_field]
         self.bst_sequence_field = bst_sequence_field
         assert len(self.bst_target_field) == len(self.bst_sequence_field), \
-               "len(self.bst_target_field) != len(self.bst_sequence_field)"
+            "len(self.bst_target_field) != len(self.bst_sequence_field)"
         self.use_causal_mask = use_causal_mask
         self.seq_pooling_type = seq_pooling_type
         self.feature_map = feature_map
@@ -81,8 +81,8 @@ class BST(BaseModel):
         seq_out_dim = 0
         for sequence_field in self.bst_sequence_field:
             if type(sequence_field) == tuple:
-                model_dim = embedding_dim * (int(use_position_emb) + len(sequence_field)) # concat position emb
-                seq_len = feature_map.features[sequence_field[0]]["max_len"] + 1 # add target item
+                model_dim = embedding_dim * (int(use_position_emb) + len(sequence_field))  # concat position emb
+                seq_len = feature_map.features[sequence_field[0]]["max_len"] + 1  # add target item
             else:
                 model_dim = embedding_dim * (1 + int(use_position_emb))
                 seq_len = feature_map.features[sequence_field]["max_len"] + 1
@@ -103,7 +103,7 @@ class BST(BaseModel):
                              output_dim=1,
                              hidden_units=dnn_hidden_units,
                              hidden_activations=dnn_activations,
-                             output_activation=self.output_activation, 
+                             output_activation=self.output_activation,
                              dropout_rates=net_dropout,
                              batch_norm=batch_norm)
         self.compile(kwargs["optimizer"], kwargs["loss"], learning_rate)
@@ -117,22 +117,22 @@ class BST(BaseModel):
         else:
             seq_out_dim = model_dim - num_seq_field * embedding_dim
         return seq_out_dim
-        
+
     def forward(self, inputs):
         X = self.get_inputs(inputs)
         feature_emb_dict = self.embedding_layer(X)
-        for idx, (target_field, sequence_field) in enumerate(zip(self.bst_target_field, 
+        for idx, (target_field, sequence_field) in enumerate(zip(self.bst_target_field,
                                                                  self.bst_sequence_field)):
             target_emb = self.concat_embedding(target_field, feature_emb_dict)
             sequence_emb = self.concat_embedding(sequence_field, feature_emb_dict)
             concat_seq_emb = torch.cat([sequence_emb, target_emb.unsqueeze(1)], dim=1)
-            seq_field = list(flatten([sequence_field]))[0] # flatten nested list to pick the first sequence field
+            seq_field = list(flatten([sequence_field]))[0]  # flatten nested list to pick the first sequence field
             padding_mask, attn_mask = self.get_mask(X[seq_field])
-            transformer_out = self.transformer_encoders[idx](concat_seq_emb, attn_mask) # b x len x emb
+            transformer_out = self.transformer_encoders[idx](concat_seq_emb, attn_mask)  # b x len x emb
             pooling_emb = self.sequence_pooling(transformer_out, padding_mask)
             feature_emb_dict[f"attn_{idx}"] = pooling_emb
             for field in flatten([sequence_field]):
-                feature_emb_dict.pop(field, None) # delete old embs
+                feature_emb_dict.pop(field, None)  # delete old embs
         concat_emb = torch.cat(list(feature_emb_dict.values()), dim=-1)
         y_pred = self.dnn(concat_emb)
         return_dict = {"y_pred": y_pred}
@@ -159,7 +159,7 @@ class BST(BaseModel):
         return padding_mask, attn_mask
 
     def sequence_pooling(self, transformer_out, mask):
-        mask = (1 - mask.float()).unsqueeze(-1) # 0 for masked positions
+        mask = (1 - mask.float()).unsqueeze(-1)  # 0 for masked positions
         if self.seq_pooling_type == "mean":
             return (transformer_out * mask).sum(dim=1) / (mask.sum(dim=1) + 1.e-12)
         elif self.seq_pooling_type == "sum":
@@ -190,18 +190,19 @@ class BehaviorTransformer(nn.Module):
                  use_position_emb=True,
                  position_dim=4,
                  layer_norm=True,
-                 use_residual=True,use_cope=False,max_sequence_length=100):
+                 use_residual=True, use_cope=False, max_sequence_length=100):
         super(BehaviorTransformer, self).__init__()
         self.position_dim = position_dim
         self.use_position_emb = use_position_emb
         self.transformer_blocks = nn.ModuleList(TransformerBlock(model_dim=model_dim,
                                                                  ffn_dim=model_dim,
-                                                                 num_heads=num_heads, 
-                                                                 attn_dropout=attn_dropout, 
+                                                                 num_heads=num_heads,
+                                                                 attn_dropout=attn_dropout,
                                                                  net_dropout=net_dropout,
                                                                  layer_norm=layer_norm,
                                                                  use_residual=use_residual,
-                                                                 use_cope=use_cope,position_dim=position_dim,max_sequence_length=max_sequence_length)
+                                                                 use_cope=use_cope, position_dim=position_dim,
+                                                                 max_sequence_length=max_sequence_length)
                                                 for _ in range(stacked_transformer_layers))
         self.use_cope = use_cope
         if self.use_position_emb:
@@ -228,10 +229,10 @@ class BehaviorTransformer(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(self, model_dim=64, ffn_dim=64, num_heads=8, attn_dropout=0.0, net_dropout=0.0,
-                 layer_norm=True, use_residual=True,use_cope=False,position_dim=32,max_sequence_length=100):
+                 layer_norm=True, use_residual=True, use_cope=False, position_dim=32, max_sequence_length=100):
         super(TransformerBlock, self).__init__()
         self.attention = MultiheadAttention(model_dim,
-                                            num_heads=num_heads, 
+                                            num_heads=num_heads,
                                             dropout=attn_dropout,
                                             batch_first=True,
                                             use_cope=use_cope,
